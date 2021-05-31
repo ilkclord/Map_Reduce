@@ -97,7 +97,7 @@ int top_hash_reinit(bracket * table){
     return 0;
 }
 /*
- * hashing into table also sort it
+ * hashing into table and also sort it
  * Return value
  * 0 : the table is full
  * count - table->count : the change of the count
@@ -133,16 +133,24 @@ int top_hash_sort(bracket * table, int index ,int input , int low){ // address ,
  * @0 : discard
  */
 int top_hash_insert(top_hash * top , int input){
+   //upper range
    if(input > top->up)
      top->up = input ;
-   if(input < top->low  && top->current < 10){
+
+   /*
+    * When the table isn't full
+    */
+   if(input < top->low  && top->current < 10)
      top->low = input ;
-   }
+   // discard
    if(input < top->low)
      return 0 ;
+   // When there are 2 elements ,get the range
    if(!top->low && top->current == 1)
      top->low = low_update(top->table , top->low) ;
-   else if(top->current == top_n){
+
+   // The table is full
+   if(top->current == top_n){
      top->current-- ;
      top->low = low_update(top->table , top->low) ;
      if(top->low > input)

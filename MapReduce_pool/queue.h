@@ -31,7 +31,6 @@
 #define writing  0
 #define raw      2
 
-pthread_mutex_t p ;
 uint8_t mask = 16 ;
 uint8_t wmask = 15 ;
 struct input{
@@ -43,10 +42,15 @@ struct input{
 typedef int func(info * i) ;
 
 int foo(info * i){
-  //printf("foo %d \n" , i->start + i->end) ;
-  return 1 ;
+    return 1 ;
 }
-
+/* Ring buffer aka jobqueue :
+ *
+ * Provide an array of pointer , each points to the data aka job
+ * Like a hook used to hang the clothes
+ *
+ * Using state to double check the accuracy
+ */
 struct job{
     info * data ;
     func * func ;
@@ -59,7 +63,6 @@ struct jobqueue{
     uint8_t write ;
     uint8_t entry ;
     uint8_t load ;
-    uint8_t round ;
 } typedef queue ;
 
 uint8_t queue_state(queue * q) ;
@@ -87,11 +90,9 @@ uint8_t queue_init(queue ** q){
     *q = malloc(sizeof(queue)) ;
     if(!q)
       return 0 ;
-    pthread_mutex_init(&p , NULL) ;
     (*q)->read = 0 ;
     (*q)->write = 0 ;
     (*q)->entry = 0 ;
-    (*q)->round = 0 ;
     (*q)->load = 1 ;
     for(int i = 0 ; i < rbuffer_s ; i++)
       (*q)->state[i] = raw ;
@@ -102,80 +103,40 @@ uint8_t load(queue * q ,int a){
   q->load = a ;
   return 1 ;
 }
+/*
+ * Writing into queue
+ */
 uint8_t queue_w(queue * q , job * j , int id , int ji){
-    if(( q->entry/*  atomic_load(&q->entry)*/ & mask)){
-      //printf("oops") ;
+    if(( q->entry & mask)){
       return 0 ;
      }
     atomic_fetch_add(&q->entry , 1) ;
-     int ro = q->round;
-    int w  = atomic_fetch_add(&q->write , 1) ;
-    int w2 = w ;
-    w = w & wmask ;
-    /*  if(w == 15){
-      atomic_store(&q->write , 0) ;
-      //ro = atomic_fetch_add(&q->round , 1) ;
-    }
-    else if (w > 15){
-      printf("largeer w : %d\n" , w) ;
-      //ro = atomic_fetch_add(&q->round , 1) ;
-      w = 0 ;
-    }*/
-
-    int out = 0 , r ;
+    int w  = atomic_fetch_add(&q->write , 1) & wmask;
     while(atomic_load(&q->state[w]) != raw){
-      if(!out){
-      //pthread_mutex_lock(&p) ;
-      r= atomic_load(&q->read) & wmask;
-      //printf("shit ! ow : %d  w : %d , r : %d data : %d\n" ,w2 , w ,r ,j->data->start) ;
-      //queue_state(q) ;
-      //queue_info(q) ;
-      //printf("---------\n") ;
-      //pthread_mutex_unlock(&p) ;
-      }
-      out++ ;
+      /*
+       * in the test program the write funtion keeps writing data into the buffer
+       */
       if(!q->load ){
         atomic_fetch_sub(&q->entry , 1) ;
-        /*  
-        queue_state(q) ;
-        printf("                                                                  time out\n") ;
-        printf(" ow : %d  w : %d , r : %d data : %d\n" ,w2 , w ,r ,j->data->start) ;
-        queue_state(q) ;
-        queue_info(q) ;
-        */
         return 0 ; 
       }
     };
     atomic_store(&q->state[w] , writing) ;
-   
-
-
     q->buffer[w] = j ;
-    if(out > 1000 ){
-      //queue_state(q) ;
-      //queue_info(q) ;
-      
-      //printf("success write\n") ;
-    }
-
     atomic_store(&q->state[w] , readable) ;
-    //atomic_fetch_add(&q->entry , 1) ;
-    //printf("%d\n" , w) ;
     return 1 ;
 }
-
+/*
+ * Reading out the queue
+ */
 uint8_t queue_r(queue * q ,job ** j ){
     if(q->entry ==  0)
       return 0 ;
-    int r  = atomic_fetch_add(&q->read , 1) & wmask;
-
+    atomic_fetch_sub(&q->entry , 1) ;
+    int r = atomic_fetch_add(&q->read , 1) & wmask;
     while(q->state[r] != readable) ;
     *j = q->buffer[r] ;
     atomic_store(&q->state[r] , raw) ;
-    int ro = atomic_load(&q->round) ;
-    atomic_fetch_sub(&q->entry , 1) ;
-    //printf("%d %d\n" ,ro, r) ;
-    printf("%d\n" , (*j)->data->start);
     return 1 ;
 }
 
@@ -184,7 +145,7 @@ uint8_t queue_r(queue * q ,job ** j ){
  */
 
 uint8_t info_info(info * i){
-    printf(" info :　%d %d %s\n" , i->start , i->end ,i->pwd) ;
+    printf(" info :　%d %d " , i->start , i->end ) ;
     return 1 ;
 }
 
@@ -200,6 +161,7 @@ uint8_t queue_info(queue  * q){
   for(int i  = 0 ; i < q->entry ; i++){
     printf("%d :" , j) ;
     job_info(q->buffer[j]) ;
+    printf("state :%d \n" , q->state[j]) ;
     j++ ;
     if(j > 15)
       j = 0 ;
